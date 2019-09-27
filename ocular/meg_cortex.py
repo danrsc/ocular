@@ -46,6 +46,7 @@ def surface_nearest_neighbor_input(surface, core_vertices, max_radius_mm, border
     distances = cdist(surface.pts, surface.pts[core_vertices])
     indices_core = np.argmin(distances, axis=1)
     indices_surface = np.arange(len(surface.pts))
+    distances = distances[(indices_surface, indices_core)]
     indicator_radius = distances <= max_radius_mm
     if border_max_radius_mm is not None:
         indicator_border = np.logical_and(np.logical_not(indicator_radius), distances <= border_max_radius_mm)
@@ -230,4 +231,4 @@ def cmap_rgba_bytes(data, indicator_foreground=None, cmap=None, vmin=None, vmax=
     rgba = mappable.to_rgba(np.where(indicator_foreground, data, min_value), bytes=True)
     rgba = np.where(np.expand_dims(indicator_foreground, 1), rgba, np.expand_dims(background, 0))
 
-    return rgba
+    return rgba, mappable
