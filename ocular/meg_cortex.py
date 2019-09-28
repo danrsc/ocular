@@ -3,13 +3,16 @@ from scipy.spatial.distance import cdist
 from matplotlib.cm import ScalarMappable
 import matplotlib
 import matplotlib.colors
+import matplotlib.cm
 
 
 __all__ = [
     'surface_nearest_neighbor_input',
     'make_vertex_data',
+    'color_rgba_bytes',
     'dual_color_rgba_bytes',
-    'cmap_rgba_bytes']
+    'cmap_rgba_bytes',
+    'one_hundred_colors']
 
 
 def surface_nearest_neighbor_input(surface, core_vertices, max_radius_mm, border_max_radius_mm=None):
@@ -184,19 +187,50 @@ def dual_color_rgba_bytes(data, indicator_color_1, indicator_color_2, colors=Non
 
     result = np.empty(data.shape + (4,), dtype=colors.dtype)
 
-    indicator_foreground = np.logical_or(indicator_color_1, indicator_color_2)
+    if indicator_color_2 is None:
+        indicator_foreground = indicator_color_1
+    else:
+        indicator_foreground = np.logical_or(indicator_color_1, indicator_color_2)
     c = data[indicator_foreground]
     indicator_c1 = indicator_color_1[indicator_foreground]
 
     if not np.issubdtype(c.dtype, np.integer):
         c = np.round(c).astype(int)
-    c = np.mod(c, len(colors) * len(colors))
-    c1, c2 = np.unravel_index(c, (len(colors), len(colors)))
-    c = np.where(indicator_c1, c1, c2)
+    if indicator_color_2 is None:
+        c = np.mod(c, len(colors))
+    else:
+        c = np.mod(c, len(colors) * len(colors))
+        c1, c2 = np.unravel_index(c, (len(colors), len(colors)))
+        c = np.where(indicator_c1, c1, c2)
     result[indicator_foreground] = colors[c]
     result[np.logical_not(indicator_foreground)] = background
 
     return (result * 255).astype(np.uint8)
+
+
+def color_rgba_bytes(data, indicator_foreground=None, colors=None, background=None):
+    """
+    Maps data to colors. For each value in data, the value is converted into a color index by taking
+    round(data) % len(colors). colors[index_color] is then used as the color wherever
+    indicator_foreground is True, and background is used everywhere else.
+    Args:
+        data: The data to map to colors. If not an integer type, the data will be rounded and converted to an
+            integer type
+        indicator_foreground: If specified, any data where indicator_foreground is False will take the background
+            color (or use alpha=0 if background is None). np.isnan(data) is also put in the background
+        colors: The color palette to draw from. If not specified,
+            defaults to the matplotlib color cycle (i.e. TABLEAU_COLORS), which has 10 separate colors
+        background: The color for the background. If not specified, defaults to (0, 0, 0, 0)
+
+    Returns:
+        rgba_bytes: An array with shape data.shape + (4,) that has type uint8 with values ranging from 0-255.
+    """
+    if indicator_foreground is not None:
+        indicator_foreground = np.logical_and(indicator_foreground, np.logical_not(np.isnan(data)))
+    else:
+        indicator_foreground = np.logical_not(np.isnan(data))
+
+    return dual_color_rgba_bytes(data, indicator_foreground, None, colors=colors, background=background)
 
 
 def cmap_rgba_bytes(data, indicator_foreground=None, cmap=None, vmin=None, vmax=None, background=None):
@@ -232,3 +266,108 @@ def cmap_rgba_bytes(data, indicator_foreground=None, cmap=None, vmin=None, vmax=
     rgba = np.where(np.expand_dims(indicator_foreground, 1), rgba, np.expand_dims(background, 0))
 
     return rgba, mappable
+
+
+def one_hundred_colors():
+    return [
+        '#ffcdd2',
+        '#ef5350',
+        '#d32f2f',
+        '#b71c1c',
+        '#F48FB1',
+        '#D81B60',
+        '#AD1457',
+        '#880E4F',
+        '#BA68C8',
+        '#9C27B0',
+        '#7B1FA2',
+        '#4A148C',
+        '#B39DDB',
+        '#7E57C2',
+        '#512DA8',
+        '#5C6BC0',
+        '#3F51B5',
+        '#303F9F',
+        '#64B5F6',
+        '#2196F3',
+        '#1976D2',
+        '#0D47A1',
+        '#80DEEA',
+        '#00BCD4',
+        '#0097A7',
+        '#006064',
+        '#A5D6A7',
+        '#66BB6A',
+        '#43A047',
+        '#18FFFF',
+        '#1DE9B6',
+        '#76FF03',
+        '#FFEB3B',
+        '#FBC02D',
+        '#F9A825',
+        '#FF3D00',
+        '#F57F17',
+        '#6D4C41',
+        '#4E342E',
+        '#9E9D24',
+        '#D7CCC8',
+        '#3E2723',
+        '#F5F5F5',
+        '#E0E0E0',
+        '#BDBDBD',
+        '#9E9E9E',
+        '#616161',
+        '#424242',
+        '#fb5e79',
+        '#B0BEC5',
+        '#90A4AE',
+        '#607D8B',
+        '#455A64',
+        '#D500F9',
+        '#6200EA',
+        '#00C853',
+        '#B3E5FC',
+        '#DCEDC8',
+        '#2E7D32',
+        '#263238',
+        '#D84315',
+        '#5c415d',
+        '#aa767c',
+        '#63223c',
+        '#7177a7',
+        '#bf8033',
+        '#CFD8DC',
+        '#37474F',
+        '#FFFF00',
+        '#8FBC8B',
+        '#BDB76B',
+        '#F5DEB3',
+        '#CD853F',
+        '#2F4F4F',
+        '#B0E0E6',
+        '#000080',
+        '#DDA0DD',
+        '#D8BFD8',
+        '#9F8E6D',
+        '#551919',
+        '#B1E7CC',
+        '#82E7B7',
+        '#B76345',
+        '#844731',
+        '#FF8308',
+        '#AEFF07',
+        '#014EFF',
+        '#4B01FF',
+        '#FF0094',
+        '#CEFFA8',
+        '#FF2101',
+        '#5B3B4A',
+        '#FEA7AC',
+        '#776E66',
+        '#C4B6A5',
+        '#978C7F',
+        '#C1EDDC',
+        '#46FE03',
+        '#31B002',
+        '#BBFE01'
+    ]
