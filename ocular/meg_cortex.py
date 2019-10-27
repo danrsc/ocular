@@ -1,9 +1,12 @@
+import os
+import glob
 import numpy as np
 from scipy.spatial.distance import cdist
 from matplotlib.cm import ScalarMappable
 import matplotlib
 import matplotlib.colors
 import matplotlib.cm
+from matplotlib.image import imread
 
 
 __all__ = [
@@ -12,6 +15,7 @@ __all__ = [
     'color_rgba_bytes',
     'dual_color_rgba_bytes',
     'cmap_rgba_bytes',
+    'comparison_cmap_rgba_bytes',
     'one_hundred_colors']
 
 
@@ -100,27 +104,25 @@ def make_vertex_data(
     if border_radius_mm is not None and radius_mm is None:
         raise ValueError('If border_radius_mm is given, radius_mm must also be given')
 
-    if mask is None:
-        left_mask = np.full(len(inverse_op['src'][0]['vertno']), True)
-        right_mask = np.full(len(inverse_op['src'][1]['vertno']), True)
-    else:
-        left_mask = mask[:len(inverse_op['src'][0]['vertno'])]
-        right_mask = mask[len(inverse_op['src'][0]['vertno']):]
-        if len(right_mask) != len(inverse_op['src'][1]['vertno']):
-            raise ValueError('mask length does not match inverse operator src vertices')
-
     # indices in the input data
-    left_indices = np.arange(len(inverse_op['src'][0]['vertno']))[left_mask]
-    right_indices = np.arange(len(inverse_op['src'][1]['vertno']))[right_mask]
+    left_indices = np.arange(len(inverse_op['src'][0]['vertno']))
+    right_indices = np.arange(len(inverse_op['src'][1]['vertno']))
+
+    if len(data) != len(left_indices) + len(right_indices):
+        raise ValueError('data.shape[0] must be the same the number of dipoles in the inverse operator. '
+                         'Expected {}, got {}'.format(len(left_indices) + len(right_indices), len(data)))
 
     # indices in the VertexData
-    left_vertices = inverse_op['src'][0]['vertno'][left_mask]
-    right_vertices = inverse_op['src'][1]['vertno'][right_mask]
+    left_vertices = inverse_op['src'][0]['vertno']
+    right_vertices = inverse_op['src'][1]['vertno']
 
     vertex_data = np.full(
         (len(surfaces[0].pts) + len(surfaces[1].pts),) + data.shape[1:], fill_value=fill_value, dtype=dtype)
     indicator_dipole = np.full(vertex_data.shape, False)
     indicator_border = None
+    vertex_mask = None
+    if mask is not None:
+        vertex_mask = np.full(vertex_data.shape, False)
 
     if radius_mm is not None:
         if border_radius_mm is not None:
@@ -140,6 +142,10 @@ def make_vertex_data(
             vertex_data[left_border_vertices] = data[left_border_indices]
             vertex_data[right_border_vertices + len(surfaces[0].pts)] = \
                 data[right_border_indices + len(inverse_op['src'][0]['vertno'])]
+            if mask is not None:
+                vertex_mask[left_border_vertices] = mask[left_border_indices]
+                vertex_mask[right_border_vertices + len(surfaces[0].pts)] = \
+                    mask[right_border_indices + len(inverse_op['src'][0]['vertno'])]
         else:
             left_vertices, left_indices_core_vertices = surface_nearest_neighbor_input(
                 surfaces[0], left_vertices, radius_mm)
@@ -152,9 +158,16 @@ def make_vertex_data(
     indicator_dipole[right_vertices + len(surfaces[0].pts)] = True
     vertex_data[left_vertices] = data[left_indices]
     vertex_data[right_vertices + len(surfaces[0].pts)] = data[right_indices + len(inverse_op['src'][0]['vertno'])]
+    if mask is not None:
+        vertex_mask[left_vertices] = mask[left_indices]
+        vertex_mask[right_vertices + len(surfaces[0].pts)] = mask[right_indices + len(inverse_op['src'][0]['vertno'])]
+        vertex_data = np.where(vertex_mask, vertex_data, fill_value)
+    result = (vertex_data, indicator_dipole)
     if border_radius_mm is not None:
-        return vertex_data, indicator_dipole, indicator_border
-    return vertex_data, indicator_dipole
+        result += (indicator_border,)
+    if vertex_mask is not None:
+        result += (vertex_mask,)
+    return result
 
 
 def dual_color_rgba_bytes(data, indicator_color_1, indicator_color_2, colors=None, background=None):
@@ -185,14 +198,11 @@ def dual_color_rgba_bytes(data, indicator_color_1, indicator_color_2, colors=Non
     colors = np.array(list(matplotlib.colors.to_rgba(c) for c in colors))
     background = matplotlib.colors.to_rgba('none') if background is None else matplotlib.colors.to_rgba(background)
 
-    result = np.empty(data.shape + (4,), dtype=colors.dtype)
-
     if indicator_color_2 is None:
         indicator_foreground = indicator_color_1
     else:
         indicator_foreground = np.logical_or(indicator_color_1, indicator_color_2)
-    c = data[indicator_foreground]
-    indicator_c1 = indicator_color_1[indicator_foreground]
+    c = np.where(indicator_foreground, data, 0)
 
     if not np.issubdtype(c.dtype, np.integer):
         c = np.round(c).astype(int)
@@ -201,9 +211,12 @@ def dual_color_rgba_bytes(data, indicator_color_1, indicator_color_2, colors=Non
     else:
         c = np.mod(c, len(colors) * len(colors))
         c1, c2 = np.unravel_index(c, (len(colors), len(colors)))
-        c = np.where(indicator_c1, c1, c2)
-    result[indicator_foreground] = colors[c]
-    result[np.logical_not(indicator_foreground)] = background
+        c = np.where(indicator_color_1, c1, c2)
+
+    result = np.where(
+        np.reshape(indicator_foreground, indicator_foreground.shape + (1,)),
+        np.reshape(colors[np.reshape(c, -1)], c.shape + (4,)),
+        np.reshape(background, (1,) * len(indicator_foreground.shape) + np.shape(background)))
 
     return (result * 255).astype(np.uint8)
 
@@ -233,6 +246,108 @@ def color_rgba_bytes(data, indicator_foreground=None, colors=None, background=No
     return dual_color_rgba_bytes(data, indicator_foreground, None, colors=colors, background=background)
 
 
+def comparison_cmap_rgba_bytes(
+        data_x,
+        data_y,
+        cmap=None,
+        indicator_foreground=None,
+        vmin_x=None,
+        vmax_x=None,
+        vmin_y=None,
+        vmax_y=None,
+        background=None):
+    """
+    Similar to pycortex.Vertex2D behavior, this function allows the comparison of 2 sets of data using a 2D colormap.
+    Returns the rgba data corresponding to the 2D colormap specified.
+    Args:
+        data_x: The data which goes on the x-axis of the 2D colormap
+        data_y: The data which goes on the y-axis of the 2D colormap
+        cmap: The colormap to use. If None, defaults to pycortex.options.config.get('basic', 'default_cmap2D')
+        indicator_foreground: A mask with True where the colormap should be used and False where a background color
+            should be used. If None, becomes np.logical_not(np.logical_or(np.isnan(data_1), np.isnan(data_2)))
+        vmin_x: The minimum value for colormap normalization along the x-axis.
+            If None, vmin_x is determined from the data
+        vmax_x: The maximum value to use for colormap normalization along the x-axis.
+            If None, vmax_x is determined from the data
+        vmin_y: The minimum value for colormap normalization along the y-axis.
+            If None, vmin_y is determined from the data
+        vmax_y: The maximum value to use for colormap normalization along the y-axis.
+            If None, vmax_y is determined from the data
+        background: The color for data which is nan or where indicator_foreground is False. If None, defaults to
+            (0, 0, 0, 0)
+
+    Returns:
+        rgba_bytes: An array with shape data.shape + (4,) that has type uint8 with values ranging from 0-255.
+        norm_x: An instance of matplotlib.colors.Normalize that can be used to access information such as vmin_x, vmax_x
+        norm_y: An instance of matplotlib.colors.Normalize that can be used to access informatino such as vmin_y, vmax_y
+        cmap: The 2D colormap as rgba floats, i.e. in the interval [0, 1]. This cmap can be plotted using imshow, e.g.
+    """
+
+    if not np.array_equal(data_x.shape, data_y.shape):
+        raise ValueError('data_1 shape ({}) must be equal to data_2 shape ({})'.format(data_x.shape, data_y.shape))
+
+    if cmap is None or isinstance(cmap, str):
+        from cortex import options
+        if cmap is None:
+            cmap = options.config.get('basic', 'default_cmap2D')
+        cmap_dir = options.config.get('webgl', 'colormaps')
+        color_maps = glob.glob(os.path.join(cmap_dir, '*.png'))
+        color_maps = dict(((os.path.split(c)[1][:-len('.png')], c) for c in color_maps))
+        if cmap not in color_maps:
+            raise ValueError('Unknown color map: {}'.format(cmap))
+
+        cmap = imread(os.path.join(cmap_dir, '{}.png'.format(cmap)))
+
+    if indicator_foreground is not None:
+        indicator_foreground = np.logical_and(
+            indicator_foreground,
+            np.logical_not(np.logical_or(np.isnan(data_x), np.isnan(data_y))))
+    else:
+        indicator_foreground = np.logical_not(np.logical_or(np.isnan(data_x), np.isnan(data_y)))
+
+    norm_x = matplotlib.colors.Normalize(vmin=vmin_x, vmax=vmax_x, clip=True)
+    norm_y = matplotlib.colors.Normalize(vmin=vmin_y, vmax=vmax_y, clip=True)
+
+    min_value_x = 0 if np.count_nonzero(indicator_foreground) == 0 else np.nanmin(data_x)
+    min_value_y = 0 if np.count_nonzero(indicator_foreground) == 0 else np.nanmin(data_y)
+
+    data_x = norm_x(np.where(indicator_foreground, data_x, min_value_x))
+    data_y = 1 - norm_y(np.where(indicator_foreground, data_y, min_value_y))
+
+    data_x = np.round(data_x * (cmap.shape[1] - 1)).astype(np.uint32)
+    data_y = np.round(data_y * (cmap.shape[0] - 1)).astype(np.uint32)
+
+    rgba = np.reshape(cmap[(np.reshape(data_y, -1), np.reshape(data_x, -1))], data_x.shape + (4,))
+    rgba = (rgba * 255).astype(np.uint8)
+
+    if background is None:
+        background = 'none'
+
+    background = (255 * np.array(matplotlib.colors.to_rgba(background))).astype(np.uint8)
+    rgba = np.where(
+        np.reshape(indicator_foreground, indicator_foreground.shape + (1,)),
+        rgba,
+        np.reshape(background, (1,) * len(indicator_foreground.shape) + np.shape(background)))
+
+    return rgba, norm_x, norm_y, cmap
+
+
+def plot_2d_colormap(
+        fig, ax, cmap, vmin_x, vmax_x, vmin_y, vmax_y, x_label=None, y_label=None, use_black_background=False):
+    ax.imshow(cmap)
+    ax.set_xticks([0, cmap.shape[1]])
+    ax.set_yticks([0, cmap.shape[0]])
+    ax.set_xticklabels([vmin_x, vmax_x])
+    ax.set_yticklabels([vmin_y, vmax_y])
+    if x_label is not None:
+        ax.set_xlabel(x_label, color='white') if use_black_background else ax.set_xlabel(x_label)
+    if y_label is not None:
+        ax.set_ylabel(y_label, color='white') if use_black_background else ax.set_ylabel(y_label)
+    if use_black_background:
+        fig.patch.set_facecolor('black')
+        ax.tick_params(color='white', labelcolor='white')
+
+
 def cmap_rgba_bytes(data, indicator_foreground=None, cmap=None, vmin=None, vmax=None, background=None):
     """
     Maps data to colors using a colormap.
@@ -247,7 +362,8 @@ def cmap_rgba_bytes(data, indicator_foreground=None, cmap=None, vmin=None, vmax=
             (0, 0, 0, 0)
 
     Returns:
-
+        rgba_bytes: An array with shape data.shape + (4,) that has type uint8 with values ranging from 0-255.
+        mappable: An instance of matplotlib.cm.ScalarMappable that can be used to get information about vmin, vmax, etc.
     """
     if indicator_foreground is not None:
         indicator_foreground = np.logical_and(indicator_foreground, np.logical_not(np.isnan(data)))
@@ -263,7 +379,10 @@ def cmap_rgba_bytes(data, indicator_foreground=None, cmap=None, vmin=None, vmax=
 
     min_value = 0 if np.count_nonzero(indicator_foreground) == 0 else np.nanmin(data)
     rgba = mappable.to_rgba(np.where(indicator_foreground, data, min_value), bytes=True)
-    rgba = np.where(np.expand_dims(indicator_foreground, 1), rgba, np.expand_dims(background, 0))
+    rgba = np.where(
+        np.reshape(indicator_foreground, indicator_foreground.shape + (1,)),
+        rgba,
+        np.reshape(background, (1,) * len(indicator_foreground.shape) + np.shape(background)))
 
     return rgba, mappable
 
