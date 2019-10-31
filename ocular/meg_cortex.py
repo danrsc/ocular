@@ -16,6 +16,8 @@ __all__ = [
     'dual_color_rgba_bytes',
     'cmap_rgba_bytes',
     'comparison_cmap_rgba_bytes',
+    'get_cmap_2d',
+    'plot_2d_colormap',
     'one_hundred_colors']
 
 
@@ -246,6 +248,20 @@ def color_rgba_bytes(data, indicator_foreground=None, colors=None, background=No
     return dual_color_rgba_bytes(data, indicator_foreground, None, colors=colors, background=background)
 
 
+def get_cmap_2d(name=None):
+    from cortex import options
+    if name is None:
+        name = options.config.get('basic', 'default_cmap2D')
+
+    cmap_dir = options.config.get('webgl', 'colormaps')
+    color_maps = glob.glob(os.path.join(cmap_dir, '*.png'))
+    color_maps = dict(((os.path.split(c)[1][:-len('.png')], c) for c in color_maps))
+    if name not in color_maps:
+        raise ValueError('Unknown color map: {}'.format(name))
+
+    return imread(os.path.join(cmap_dir, '{}.png'.format(name)))
+
+
 def comparison_cmap_rgba_bytes(
         data_x,
         data_y,
@@ -287,16 +303,7 @@ def comparison_cmap_rgba_bytes(
         raise ValueError('data_1 shape ({}) must be equal to data_2 shape ({})'.format(data_x.shape, data_y.shape))
 
     if cmap is None or isinstance(cmap, str):
-        from cortex import options
-        if cmap is None:
-            cmap = options.config.get('basic', 'default_cmap2D')
-        cmap_dir = options.config.get('webgl', 'colormaps')
-        color_maps = glob.glob(os.path.join(cmap_dir, '*.png'))
-        color_maps = dict(((os.path.split(c)[1][:-len('.png')], c) for c in color_maps))
-        if cmap not in color_maps:
-            raise ValueError('Unknown color map: {}'.format(cmap))
-
-        cmap = imread(os.path.join(cmap_dir, '{}.png'.format(cmap)))
+        cmap = get_cmap_2d(cmap)
 
     if indicator_foreground is not None:
         indicator_foreground = np.logical_and(
@@ -334,11 +341,13 @@ def comparison_cmap_rgba_bytes(
 
 def plot_2d_colormap(
         fig, ax, cmap, vmin_x, vmax_x, vmin_y, vmax_y, x_label=None, y_label=None, use_black_background=False):
+    if cmap is None or isinstance(cmap, str):
+        cmap = get_cmap_2d(cmap)
     ax.imshow(cmap)
     ax.set_xticks([0, cmap.shape[1]])
     ax.set_yticks([0, cmap.shape[0]])
     ax.set_xticklabels([vmin_x, vmax_x])
-    ax.set_yticklabels([vmin_y, vmax_y])
+    ax.set_yticklabels([vmax_y, vmin_y])
     if x_label is not None:
         ax.set_xlabel(x_label, color='white') if use_black_background else ax.set_xlabel(x_label)
     if y_label is not None:
