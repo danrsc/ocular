@@ -208,6 +208,7 @@ class BarGroup:
         if self.train_keys is not None:
             self.train_keys = [self.train_keys[i] for i in sort_order]
         if isinstance(self.color, (list, tuple)):
+            # noinspection PyUnresolvedReferences
             self.color = [self.color[i] for i in sort_order]
         invert_sort = [i for i, _ in sorted(enumerate(sort_order), key=lambda item: item[1])]
         if self.significance_pairs is not None:

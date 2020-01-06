@@ -249,6 +249,7 @@ def color_rgba_bytes(data, indicator_foreground=None, colors=None, background=No
 
 
 def get_cmap_2d(name=None):
+    # noinspection PyUnresolvedReferences
     from cortex import options
     if name is None:
         name = options.config.get('basic', 'default_cmap2D')
