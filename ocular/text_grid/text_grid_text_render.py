@@ -77,7 +77,7 @@ class _WidthInfo:
             broken_word_count=broken_word_count,
             broken_column_count=broken_word_count > 1,
             non_user_count=1 if explicit_width is not None and explicit_width > 0 and explicit_width != width else 0,
-            under_padding=text_cell.colum_padding(width) < text_cell.desired_column_padding())
+            under_padding=text_cell.column_padding(width) < text_cell.desired_column_padding())
 
     @staticmethod
     def combine(items: Sequence['_WidthInfo']) -> '_WidthInfo':
@@ -311,7 +311,7 @@ class _TextGridTextRender:
 
         # noinspection PyTypeChecker
         candidates = [_WidthInfo.diff(
-            _WidthInfo.combine(column_info_target[i]), _WidthInfo.combine(column_info_current[i]))
+            column_info_target[i], column_info_current[i])
             for i in column_info_target]
 
         candidates = sorted(candidates, key=lambda w: (

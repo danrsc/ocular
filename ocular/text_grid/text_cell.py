@@ -36,7 +36,7 @@ class TextCell:
         :param no_break_width: The width at which no lines are broken.
         :return: The actual amount of padding given these parameters.
         """
-        return max(0, min((width - no_break_width) / 2, desired_padding))
+        return max(0, min((width - no_break_width) // 2, desired_padding))
 
     def desired_column_padding(self):
         """
